@@ -96,12 +96,12 @@ proxy-on(){
   export https_proxy="http://127.0.0.1:<your-mixed-proxy-port>"
   export all_proxy="socks5://127.0.0.1:<your-mixed-proxy-port>"
 
-  export HTTP_PROXY=$http_proxy 
-  export HTTPS_PROXY=$https_proxy 
-  export ALL_PROXY=$all_proxy 
+  export HTTP_PROXY=${http_proxy} 
+  export HTTPS_PROXY=${https_proxy} 
+  export ALL_PROXY=${all_proxy} 
 
   export no_proxy="localhost,127.0.0.1,::1"
-  export NO_PROXY=$no_proxy
+  export NO_PROXY=${no_proxy}
   echo "CLI Proxy IS Now ON. "
 }
 
