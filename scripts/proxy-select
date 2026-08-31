@@ -1,0 +1,656 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# ============================================================
+# proxy-select
+#
+# Mihomo CLI node selector
+#
+# Enter   Select node
+# Ctrl-R  Re-run health check
+# Esc     Exit
+#
+# Requires:
+#   curl jq fzf base64
+# ============================================================
+
+CONFIG="${MIHOMO_CLI_CONFIG:-$HOME/.config/mihomo/mihomo.env}"
+
+if [[ ! -r "$CONFIG" ]]; then
+  echo "Config not found: $CONFIG" >&2
+  exit 1
+fi
+
+# shellcheck disable=SC1090
+source "$CONFIG"
+
+: "${MIHOMO_API:=http://127.0.0.1:9090}"
+: "${MIHOMO_SECRET:=}"
+: "${MIHOMO_GROUP:=PROXY}"
+
+: "${MIHOMO_TEST_URL:=https://www.gstatic.com/generate_204}"
+: "${MIHOMO_TEST_TIMEOUT:=5000}"
+
+MIHOMO_API="${MIHOMO_API%/}"
+
+# ------------------------------------------------------------
+# Dependencies
+# ------------------------------------------------------------
+
+for cmd in curl jq fzf base64; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "Missing dependency: $cmd" >&2
+    exit 1
+  fi
+done
+
+# ------------------------------------------------------------
+# Runtime cache
+# ------------------------------------------------------------
+
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}"
+
+CACHE_DIR="$RUNTIME_DIR/mihomo-proxy-select-$UID"
+DELAY_CACHE="$CACHE_DIR/delay.json"
+
+mkdir -p "$CACHE_DIR"
+chmod 700 "$CACHE_DIR"
+
+# ------------------------------------------------------------
+# Authentication
+# ------------------------------------------------------------
+
+AUTH_ARGS=()
+
+if [[ -n "$MIHOMO_SECRET" ]]; then
+  AUTH_ARGS=(
+    -H "Authorization: Bearer $MIHOMO_SECRET"
+  )
+fi
+
+# ------------------------------------------------------------
+# HTTP helpers
+#
+# Always bypass shell proxy variables.
+# ------------------------------------------------------------
+
+api_get() {
+  curl \
+    --noproxy '*' \
+    --fail \
+    --silent \
+    --show-error \
+    "${AUTH_ARGS[@]}" \
+    "$@"
+}
+
+api_put() {
+  curl \
+    --noproxy '*' \
+    --fail \
+    --silent \
+    --show-error \
+    "${AUTH_ARGS[@]}" \
+    -X PUT \
+    "$@"
+}
+
+urlencode() {
+  jq -rn --arg x "$1" '$x | @uri'
+}
+
+GROUP_ESCAPED="$(urlencode "$MIHOMO_GROUP")"
+
+# ------------------------------------------------------------
+# Controller check
+# ------------------------------------------------------------
+
+check_controller() {
+  if ! api_get "$MIHOMO_API/version" >/dev/null; then
+    echo "Cannot connect to Mihomo controller:" >&2
+    echo "  $MIHOMO_API" >&2
+    exit 1
+  fi
+}
+
+# ------------------------------------------------------------
+# Fresh health check
+#
+# IMPORTANT:
+#
+# We use the returned JSON directly instead of expecting
+# .history[-1].delay to magically appear elsewhere.
+#
+# Example:
+#
+# {
+#   "Japan 01": 53,
+#   "Hong Kong 01": 86
+# }
+# ------------------------------------------------------------
+
+health_check() {
+  local tmp
+
+  tmp="$DELAY_CACHE.tmp"
+
+  if api_get \
+    --get \
+    --data-urlencode "url=$MIHOMO_TEST_URL" \
+    --data-urlencode "timeout=$MIHOMO_TEST_TIMEOUT" \
+    "$MIHOMO_API/group/$GROUP_ESCAPED/delay" \
+    >"$tmp"; then
+
+    if jq -e 'type == "object"' "$tmp" >/dev/null 2>&1; then
+      mv "$tmp" "$DELAY_CACHE"
+      return 0
+    fi
+  fi
+
+  rm -f "$tmp"
+
+  return 1
+}
+
+# ------------------------------------------------------------
+# Read delays
+# ------------------------------------------------------------
+
+get_delay_json() {
+  if [[ -r "$DELAY_CACHE" ]]; then
+    cat "$DELAY_CACHE"
+  else
+    printf '{}\n'
+  fi
+}
+
+# ------------------------------------------------------------
+# Generate selector entries
+#
+# Sources:
+#
+# /proxies
+#   group members
+#   current selection
+#   fallback node metadata
+#
+# /providers/proxies
+#   provider node metadata
+#   type
+#   alive
+#
+# delay.json
+#   actual fresh health-check results
+# ------------------------------------------------------------
+
+list_entries() {
+  local proxies_file
+  local providers_file
+  local delays_file
+
+  proxies_file="$(mktemp "$CACHE_DIR/proxies.XXXXXX.json")"
+  providers_file="$(mktemp "$CACHE_DIR/providers.XXXXXX.json")"
+  delays_file="$(mktemp "$CACHE_DIR/delays.XXXXXX.json")"
+
+  # Always clean temporary files.
+  trap 'rm -f "$proxies_file" "$providers_file" "$delays_file"' RETURN
+
+  # --------------------------------------------------------
+  # Fetch data directly into files.
+  #
+  # IMPORTANT:
+  # Do NOT store these huge JSON documents in jq --argjson.
+  # --------------------------------------------------------
+
+  api_get "$MIHOMO_API/proxies" >"$proxies_file"
+
+  if ! api_get "$MIHOMO_API/providers/proxies" \
+    >"$providers_file" 2>/dev/null; then
+
+    printf '{"providers":{}}\n' >"$providers_file"
+  fi
+
+  get_delay_json >"$delays_file"
+
+  # Validate responses.
+  if ! jq -e 'type == "object"' "$proxies_file" >/dev/null; then
+    echo "Invalid /proxies response from Mihomo." >&2
+    return 1
+  fi
+
+  if ! jq -e 'type == "object"' "$providers_file" >/dev/null; then
+    printf '{"providers":{}}\n' >"$providers_file"
+  fi
+
+  if ! jq -e 'type == "object"' "$delays_file" >/dev/null; then
+    printf '{}\n' >"$delays_file"
+  fi
+
+  # --------------------------------------------------------
+  # Read JSON from files using --slurpfile.
+  #
+  # --slurpfile gives us an array, so:
+  #
+  #   $proxiesDoc[0]
+  #   $providersDoc[0]
+  #   $delaysDoc[0]
+  #
+  # are the actual JSON objects.
+  # --------------------------------------------------------
+
+  jq -nr \
+    --arg group "$MIHOMO_GROUP" \
+    --slurpfile proxiesDoc "$proxies_file" \
+    --slurpfile providersDoc "$providers_file" \
+    --slurpfile delaysDoc "$delays_file" '
+
+        def pad($width):
+            tostring as $s
+            | if ($s | length) >= $width then
+                  $s
+              else
+                  $s + (" " * ($width - ($s | length)))
+              end;
+
+        # Loaded documents
+        ($proxiesDoc[0] // {}) as $proxiesRoot
+        |
+        ($providersDoc[0] // {"providers":{}}) as $providersRoot
+        |
+        ($delaysDoc[0] // {}) as $delays
+
+        |
+
+        # --------------------------------------------------
+        # Flatten all provider proxies:
+        #
+        # provider A
+        #   ├── node1
+        #   └── node2
+        #
+        # provider B
+        #   ├── node3
+        #
+        # becomes:
+        #
+        # {
+        #   "node1": {...},
+        #   "node2": {...},
+        #   "node3": {...}
+        # }
+        # --------------------------------------------------
+
+        (
+            reduce (
+                ($providersRoot.providers // {})
+                | to_entries[]
+                | .value.proxies[]?
+            ) as $p (
+                {};
+                if ($p.name // null) != null then
+                    .[$p.name] = $p
+                else
+                    .
+                end
+            )
+        ) as $providerNodes
+
+        |
+
+        ($proxiesRoot.proxies // {}) as $allProxies
+
+        |
+
+        $allProxies[$group] as $groupData
+
+        |
+
+        if $groupData == null then
+            error("Proxy group not found: " + $group)
+        else
+            .
+        end
+
+        |
+
+        ($groupData.now // "") as $current
+
+        |
+
+        $groupData.all[]
+
+        |
+
+        . as $name
+
+        # --------------------------------------------------
+        # Node metadata
+        # --------------------------------------------------
+
+        |
+
+        (
+            $allProxies[$name]
+            // $providerNodes[$name]
+            // {}
+        ) as $node
+
+        # --------------------------------------------------
+        # Protocol type
+        # --------------------------------------------------
+
+        |
+
+        (
+            $node.type
+            // $providerNodes[$name].type
+            // "?"
+        ) as $type
+
+        # --------------------------------------------------
+        # Delay
+        #
+        # Priority:
+        #
+        # 1. fresh /group/.../delay result
+        # 2. /proxies history
+        # 3. provider history
+        # --------------------------------------------------
+
+        |
+
+        (
+            if ($delays | has($name)) then
+
+                $delays[$name]
+
+            elif (($node.history // []) | length) > 0 then
+
+                ($node.history[-1].delay // null)
+
+            elif (
+                (($providerNodes[$name].history // []) | length) > 0
+            ) then
+
+                (
+                    $providerNodes[$name]
+                    .history[-1]
+                    .delay
+                    // null
+                )
+
+            else
+
+                null
+
+            end
+        ) as $delay
+
+        # --------------------------------------------------
+        # Health
+        # --------------------------------------------------
+
+        |
+
+        (
+            if ($delays | has($name)) then
+
+                true
+
+            elif $node.alive != null then
+
+                $node.alive
+
+            elif $providerNodes[$name].alive != null then
+
+                $providerNodes[$name].alive
+
+            else
+
+                null
+
+            end
+        ) as $alive
+
+        # --------------------------------------------------
+        # Current marker
+        # --------------------------------------------------
+
+        |
+
+        (
+            if $name == $current then
+                "▶"
+            else
+                " "
+            end
+        ) as $currentMark
+
+        # --------------------------------------------------
+        # Health marker
+        # --------------------------------------------------
+
+        |
+
+        (
+            if $alive == true then
+
+                "\u001b[32m●\u001b[0m"
+
+            elif $alive == false then
+
+                "\u001b[31m●\u001b[0m"
+
+            else
+
+                "\u001b[33m?\u001b[0m"
+
+            end
+        ) as $healthMark
+
+        # --------------------------------------------------
+        # Delay text
+        # --------------------------------------------------
+
+        |
+
+        (
+            if $delay == null then
+
+                "--"
+
+            elif $delay <= 0 then
+
+                "DOWN"
+
+            else
+
+                (($delay | tostring) + " ms")
+
+            end
+        ) as $delayText
+
+        # --------------------------------------------------
+        # Output
+        #
+        # Field 1:
+        #   hidden exact proxy name, Base64 encoded
+        #
+        # Field 2:
+        #   pretty UI
+        # --------------------------------------------------
+
+        |
+
+        [
+            ($name | @base64),
+
+            (
+                $currentMark
+                + "  "
+                + $healthMark
+                + "  "
+                + ($delayText | pad(10))
+                + ($type | pad(16))
+                + $name
+            )
+        ]
+
+        | @tsv
+    '
+}
+
+# ------------------------------------------------------------
+# Internal modes used by fzf reload
+# ------------------------------------------------------------
+
+case "${1:-}" in
+
+--list)
+
+  list_entries
+  exit
+  ;;
+
+--refresh-list)
+
+  health_check || true
+  list_entries
+  exit
+  ;;
+
+--health)
+
+  check_controller
+
+  if health_check; then
+    echo "Health check complete."
+    jq . "$DELAY_CACHE"
+  else
+    echo "Health check failed." >&2
+    exit 1
+  fi
+
+  exit
+  ;;
+
+--debug)
+
+  check_controller
+
+  echo "=== Group ==="
+
+  api_get "$MIHOMO_API/proxies/$GROUP_ESCAPED" |
+    jq .
+
+  echo
+  echo "=== Delay cache ==="
+
+  get_delay_json |
+    jq .
+
+  echo
+  echo "=== Providers ==="
+
+  api_get "$MIHOMO_API/providers/proxies" |
+    jq '
+                .providers
+                | to_entries[]
+                | {
+                    provider: .key,
+                    nodes: [
+                        .value.proxies[]?
+                        | {
+                            name,
+                            type,
+                            alive,
+                            history
+                        }
+                    ]
+                }
+            '
+
+  exit
+  ;;
+
+esac
+
+# ------------------------------------------------------------
+# Main
+# ------------------------------------------------------------
+
+check_controller
+
+# Run a health check automatically if we do not have any
+# cached delays yet.
+if [[ ! -s "$DELAY_CACHE" ]]; then
+  printf 'Running initial health check...\r' >&2
+
+  health_check || true
+
+  printf '%*s\r' 40 '' >&2
+fi
+
+entries="$(list_entries)"
+
+if [[ -z "$entries" ]]; then
+  echo "No nodes found in group '$MIHOMO_GROUP'." >&2
+  exit 1
+fi
+
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+
+printf -v SELF_Q '%q' "$SELF"
+
+selected="$(
+  printf '%s\n' "$entries" |
+    fzf \
+      --ansi \
+      --delimiter=$'\t' \
+      --with-nth=2 \
+      --prompt="Mihomo > " \
+      --pointer="❯" \
+      --height=80% \
+      --layout=reverse \
+      --border=rounded \
+      --info=inline-right \
+      --header=$'   Health  Delay     Type            Node\n   Enter: select   Ctrl-R: retest   Esc: exit' \
+      --bind="ctrl-r:reload($SELF_Q --refresh-list)"
+)" || exit 0
+
+[[ -z "$selected" ]] && exit 0
+
+# ------------------------------------------------------------
+# Decode selected node
+# ------------------------------------------------------------
+
+encoded="${selected%%$'\t'*}"
+
+node_name="$(
+  printf '%s' "$encoded" |
+    base64 --decode
+)"
+
+[[ -n "$node_name" ]] || {
+  echo "Failed to decode node name." >&2
+  exit 1
+}
+
+# ------------------------------------------------------------
+# Switch proxy
+# ------------------------------------------------------------
+
+payload="$(
+  jq -nc \
+    --arg name "$node_name" \
+    '{name: $name}'
+)"
+
+api_put \
+  -H 'Content-Type: application/json' \
+  -d "$payload" \
+  "$MIHOMO_API/proxies/$GROUP_ESCAPED"
+
+echo
+echo "Selected: $node_name"

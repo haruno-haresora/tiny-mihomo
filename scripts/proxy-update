@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+source "$HOME/.config/mihomo/mihomo.env"
+
+curl --noproxy '*' -fsS \
+  -X PUT \
+  -H "Authorization: Bearer $MIHOMO_SECRET" \
+  "$MIHOMO_API/providers/proxies/$MIHOMO_PROVIDER"
+
+echo "Subscription updated: $MIHOMO_PROVIDER"

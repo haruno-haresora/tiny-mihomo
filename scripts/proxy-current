@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+source "$HOME/.config/mihomo/mihomo.env"
+
+curl --noproxy '*' -fsS \
+  -H "Authorization: Bearer $MIHOMO_SECRET" \
+  "$MIHOMO_API/proxies/PROXY" |
+  jq -r '"Current proxy: \(.now)"'

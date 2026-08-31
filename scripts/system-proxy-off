@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+gsettings set org.gnome.system.proxy mode 'none'
+
+echo "Desktop proxy: OFF"

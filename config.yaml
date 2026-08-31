@@ -1,0 +1,76 @@
+# =========================
+# Mihomo daemon
+# =========================
+
+mixed-port: 1082
+
+allow-lan: true
+bind-address: 127.0.0.1
+
+mode: rule
+log-level: warning
+ipv6: true
+
+tcp-concurrent: true
+unified-delay: true
+
+# Remenber the node last time chose
+profile:
+  store-selected: true
+
+# Mihomo REST API
+external-controller: 127.0.0.1:9090
+
+# Set a random secret
+secret: ""
+
+# =========================
+# Subscription
+# =========================
+
+proxy-providers:
+  airport:
+    type: http
+
+    # Subscription URL 
+    url: ""
+
+    path: ./providers/airport.yaml
+
+    # Auto-update interval (second)
+    interval: 0
+
+    health-check:
+      enable: true
+      url: https://www.gstatic.com/generate_204
+      interval: 300
+      timeout: 5000
+      lazy: true
+
+# =========================
+# Proxy groups
+# =========================
+
+proxy-groups:
+  # Choose node manually
+  - name: PROXY
+    type: select
+    use:
+      - airport
+
+  # Auto choose least latency 
+  - name: AUTO
+    type: url-test
+    use:
+      - airport
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 50
+
+# =========================
+# Rules
+# =========================
+
+rules:
+  - GEOIP,CN,DIRECT
+  - MATCH,PROXY

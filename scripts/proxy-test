@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+source "$HOME/.config/mihomo/mihomo.env"
+
+curl --noproxy '*'-fsS \
+  -H "Authorization: Bearer $MIHOMO_SECRET" \
+  "$MIHOMO_API/providers/proxies/$MIHOMO_PROVIDER/healthcheck"
+
+echo "Health check triggered."
