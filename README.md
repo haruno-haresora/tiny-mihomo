@@ -1,12 +1,12 @@
 # Tiny Mihomo
 **This is a project aimed to use mihomo-core conveniently.**
 ## How to configure  
-Clone repository:
+1. Clone repository:
 ```bash
 git clone https://github.com/haruno-haresora/tiny-mihomo.git 
 cd tiny-mihomo 
 ```
-- `config.yaml` 
+2. Modify `config.yaml`: 
 The global mihomo-core's configuration file, put it in `/etc/mihomo`:
 ```bash
 sudo mv /etc/mihomo/config.yaml /etc/mihomo/config.yaml.bak
