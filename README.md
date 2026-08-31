@@ -7,16 +7,13 @@ git clone https://github.com/haruno-haresora/tiny-mihomo.git
 cd tiny-mihomo 
 ```
 2. Modify `config.yaml`: 
-The global mihomo-core's configuration file, put it in `/etc/mihomo`:
+- The global mihomo-core's configuration file, put it in `/etc/mihomo`:
 ```bash
 sudo mv /etc/mihomo/config.yaml /etc/mihomo/config.yaml.bak
 cp ./config.yaml /etc/mihomo/ 
-```
-You need to change some values in `config.yaml`:
-```bash
 sudo vim /etc/mihomo/config.yaml
 ```
-Modify these values:
+- Modify these values:
 ```yaml
 secret: ""
 # A password for external control. 
@@ -27,13 +24,13 @@ proxy-providers:
     interval: 
     # An integer representing the auto-update interval (second), 0 means off. 
 ```
-- `mihomo.env` 
-Put this file into your own user config directory:
+3. Edit `mihomo.env`:
+- Put this file into your own user config directory:
 ```bash
 mkdir -p ~/.config/mihomo/ 
 cp ./mihomo.env ~/.config/mihomo/ 
 ```
-Edit secret variables: 
+- Edit secret variables: 
 ```bash
 nvim ~/.config/mihomo/mihomo.env
 ```
@@ -41,8 +38,8 @@ nvim ~/.config/mihomo/mihomo.env
 MIHOMO_SECRET=""
 # The password you set in /etc/mihomo/config.yaml
 ```
-- `scripts/` 
-Put all these files in your `~/.local/bin` directory
+4. `scripts/` 
+- Put all these files in your `~/.local/bin` directory
 > Or anywhere you like ♥️, but remember to add it to PATH. :)
 ```bash
 cp ./scripts/* ~/.local/bin/ 
