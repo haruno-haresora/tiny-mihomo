@@ -15,6 +15,10 @@ sudo vim /etc/mihomo/config.yaml
 ```
 - Modify these values:
 ```yaml
+mixed-port: 7890
+# It was set to 7890 in default. You can change it as you like. 
+allow-lan: false
+# It controls whether your device can share proxy to other devices in same network. Default is FALSE. 
 secret: ""
 # A password for external control. 
 proxy-providers:
@@ -34,7 +38,7 @@ cp ./mihomo.env ~/.config/mihomo/
 ```bash
 nvim ~/.config/mihomo/mihomo.env
 ```
-```env
+```bash
 MIHOMO_SECRET=""
 # The password you set in /etc/mihomo/config.yaml
 ```
@@ -44,9 +48,19 @@ MIHOMO_SECRET=""
 ```bash
 cp ./scripts/* ~/.local/bin/ 
 ```
-Completed! You can now use these commands.
 ### Note 
 If you need to change proxy port, the port variable in `scripts/system-proxy-on` should be modified at the same. 
+5. Enable mihomo daemon
+> Mihomo now has daemon file in default, it uses default config file location `/etc/mihomo/config.yaml`.  
+- Enable `mihomo` with: 
+```bash
+sudo systemctl enable --now mihomo.service
+```
+- Check status: 
+```bash
+sudo systemctl status mihomo.service
+```
+**Completed!** You can now use these commands.
 ## How to use 
 ```bash
 proxy-current 
@@ -68,10 +82,11 @@ Use a TUI to choose nodes quickly, it shows nodes' health status and latency sta
 system-proxy-on
 system-proxy-off  
 ```
-These two commands are aimed to toggle up/down gnome desktop shell's proxy settings. It sets as gnome defaultly, you should change to your own DE settings. If you're using niri, DO NOT change and set environment variables of your app's `.desktop` file which using proxy to `XDG_CURRENT_DESKTOP=GNOME`. 
+These two commands are aimed to toggle up/down gnome desktop shell's proxy settings. It sets as gnome defaultly, you should change it to your own DE settings. If you're using niri, DO NOT change and set environment variables of your app's `.desktop` file which using proxy to `XDG_CURRENT_DESKTOP=GNOME`. 
 ## Configure CLI Proxy 
+Add these lines to your `~/.bashrc` or `~/.zshrc` depends on your shell: 
 ```bash
-# You can ENABLE CLI proxy defaultly by decomment 3 lines below. 
+# You can ENABLE CLI proxy in default by uncomment these 3 lines below. 
 # export http_proxy="http://127.0.0.1:<your-mixed-proxy-port>"
 # export https_proxy="http://127.0.0.1:<your-mixed-proxy-port>"
 # export all_proxy="socks://127.0.0.1:<your-mixed-proxy-port>"
@@ -98,6 +113,4 @@ proxy-off(){
 }
 ```
 Now you can use `proxy-on` and `proxy-off` to enable and disable CLI proxy settings.
-## Configure mihomo settings
-
 ## Have fun, and feel free. ♥️
