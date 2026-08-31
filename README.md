@@ -1,5 +1,5 @@
 # Tiny Mihomo
-**This is a project aimed to use mihomo-core conveniently.**
+**A project aimed to use mihomo-core conveniently.**
 ## How to configure  
 1. Clone repository:
 ```bash
