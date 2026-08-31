@@ -48,8 +48,6 @@ MIHOMO_SECRET=""
 ```bash
 cp ./scripts/* ~/.local/bin/ 
 ```
-### Note 
-If you need to change proxy port, the port variable in `scripts/system-proxy-on` should be modified at the same. 
 5. Enable mihomo daemon
 > Mihomo now has daemon file in default, it uses default config file location `/etc/mihomo/config.yaml`.  
 - Enable `mihomo` with: 
@@ -60,6 +58,8 @@ sudo systemctl enable --now mihomo.service
 ```bash
 sudo systemctl status mihomo.service
 ```
+### Note 
+If you need to change proxy port, the port variable in `scripts/system-proxy-on` should be modified at the same. 
 **Completed!** You can now use these commands.
 ## How to use 
 ```bash
